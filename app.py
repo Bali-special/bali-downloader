@@ -65,7 +65,8 @@ def extract_video():
                 thumbnail = html.unescape(thumb_match.group(1)) if thumb_match else ''
                 
                 # Find video URL
-                video_matches = re.findall(r'https://[^"\']+\.mp4[^"\']*oe=[0-9A-Fa-f]{8}', html_content)
+                # Look for video URLs that end in .mp4 or .webm but might have query parameters
+                video_matches = re.findall(r'(https://[^"\']+\.mp4[^"\']*)', html_content)
                 if not video_matches:
                     return jsonify({'error': 'Could not find video in Meta AI page'}), 400
                     
@@ -89,6 +90,36 @@ def extract_video():
         except Exception as e:
             logger.error(f"Error extracting Meta AI video: {e}")
             return jsonify({'error': str(e)}), 500
+
+    # Custom extraction for TikTok (using TikWM as primary because yt-dlp gets blocked on Datacenter IPs)
+    if 'tiktok.com' in url:
+        try:
+            api_url = "https://www.tikwm.com/api/"
+            data = urllib.parse.urlencode({'url': url, 'count': 12, 'cursor': 0, 'web': 1, 'hd': 1}).encode('utf-8')
+            req = urllib.request.Request(api_url, data=data, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req) as res:
+                tikwm_data = json.loads(res.read().decode())
+                if tikwm_data.get('code') == 0:
+                    video_info = tikwm_data['data']
+                    result = {
+                        'url': video_info.get('play', ''),
+                        'title': video_info.get('title', 'TikTok Video'),
+                        'thumbnail': video_info.get('cover', ''),
+                        'duration': video_info.get('duration', 0),
+                        'extractor': 'TikTok (TikWM)',
+                        'uploader': video_info.get('author', {}).get('nickname', ''),
+                        'ext': 'mp4',
+                        'http_headers': {'User-Agent': 'Mozilla/5.0'},
+                        'original_url': url,
+                        'requires_proxy': True # usually required for tiktok
+                    }
+                    if result['url']:
+                        logger.info(f"Successfully extracted TikTok video: {result['title']}")
+                        return jsonify(result)
+        except Exception as e:
+            logger.warning(f"TikWM extraction failed, falling back to yt-dlp: {e}")
+            # Fall through to yt-dlp
+
 
     ydl_opts = {
         'noplaylist': True,
