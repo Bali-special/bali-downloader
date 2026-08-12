@@ -184,23 +184,25 @@ def extract_video():
         ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
         error_msg = ansi_escape.sub('', error_msg)
         
-        if 'No video formats found' in error_msg:
+        if 'No video formats found' in error_msg or 'Requested format is not available' in error_msg:
             messages = {
-                'en': 'This link does not contain a video (it might be an image only), or the account is private and requires login.',
-                'ar': 'هذا الرابط لا يحتوي على مقطع فيديو (قد يكون صورة فقط)، أو أن الحساب خاص ويتطلب تسجيل الدخول.',
-                'es': 'Este enlace no contiene un video (podría ser solo una imagen), o la cuenta es privada y requiere iniciar sesión.',
-                'pt': 'Este link não contém um vídeo (pode ser apenas uma imagem), ou a conta é privada e requer login.',
-                'id': 'Tautan ini tidak berisi video (mungkin hanya gambar), atau akun bersifat pribadi dan memerlukan login.',
-                'zh': '此链接不包含视频（可能只是一张图片），或者账户是私密的，需要登录。',
-                'ru': 'Эта ссылка не содержит видео (возможно, это только изображение), или аккаунт приватный и требует входа.',
-                'fr': 'Ce lien ne contient pas de vidéo (il peut s\'agir uniquement d\'une image), ou le compte est privé et nécessite une connexion.',
-                'hi': 'इस लिंक में कोई वीडियो नहीं है (यह केवल एक छवि हो सकती है), या खाता निजी है और लॉगिन की आवश्यकता है।',
-                'de': 'Dieser Link enthält kein Video (möglicherweise nur ein Bild), oder das Konto ist privat und erfordert eine Anmeldung.'
+                'en': 'This link does not contain a playable video (it might be an image only), or the account is private and requires login.',
+                'ar': 'هذا الرابط لا يحتوي على مقطع فيديو قابل للتشغيل (قد يكون صورة فقط)، أو أن الحساب خاص ويتطلب تسجيل الدخول.'
             }
             error_msg = messages.get(lang, messages['ar'])
             
         logger.error(f"Error extracting video from {url}: {error_msg}")
-        return jsonify({'error': error_msg}), 500
+        return jsonify({
+            'error': error_msg,
+            'details': 'Extraction failed. Please check the URL or try again later.'
+        }), 500
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    logger.error(f"Unhandled server error: {str(e)}")
+    return jsonify({
+        'error': f"Internal Server Error: {str(e)}"
+    }), 500
 
 from flask import Response, stream_with_context, send_file
 import urllib.request
