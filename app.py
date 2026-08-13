@@ -4,6 +4,9 @@ import logging
 import html
 import re
 import urllib.request
+import urllib.parse
+import json
+import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -50,75 +53,49 @@ def extract_video():
 
     # Custom extraction for Meta AI
     if 'meta.ai' in url:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         try:
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req) as response:
-                html_content = response.read().decode('utf-8')
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+            }
+            response = requests.get(url, headers=headers, timeout=15)
+            html_content = response.text
+            
+            # Find title
+            title_match = re.search(r'<title>(.*?)</title>', html_content)
+            title = html.unescape(title_match.group(1)) if title_match else 'Meta AI Video'
+            
+            # Find thumbnail
+            thumb_match = re.search(r'<meta property="og:image" content="([^"]+)"', html_content)
+            thumbnail = html.unescape(thumb_match.group(1)) if thumb_match else ''
+            
+            # Find video URL
+            # Look for video URLs that end in .mp4 or .webm but might have query parameters
+            video_matches = re.findall(r'(https://[^"\']+\.mp4[^"\']*)', html_content)
+            if not video_matches:
+                return jsonify({'error': 'Could not find video in Meta AI page'}), 400
                 
-                # Find title
-                title_match = re.search(r'<title>(.*?)</title>', html_content)
-                title = html.unescape(title_match.group(1)) if title_match else 'Meta AI Video'
-                
-                # Find thumbnail
-                thumb_match = re.search(r'<meta property="og:image" content="([^"]+)"', html_content)
-                thumbnail = html.unescape(thumb_match.group(1)) if thumb_match else ''
-                
-                # Find video URL
-                # Look for video URLs that end in .mp4 or .webm but might have query parameters
-                video_matches = re.findall(r'(https://[^"\']+\.mp4[^"\']*)', html_content)
-                if not video_matches:
-                    return jsonify({'error': 'Could not find video in Meta AI page'}), 400
-                    
-                v = video_matches[0]
-                v = v.replace('\\u0026amp;', '&').replace('\\u0026', '&')
-                v = html.unescape(v)
-                
-                result = {
-                    'url': v,
-                    'title': title,
-                    'thumbnail': thumbnail,
-                    'duration': 0,
-                    'extractor': 'Meta AI',
-                    'uploader': 'Meta AI User',
-                    'ext': 'mp4',
-                    'http_headers': headers,
-                    'original_url': url
-                }
-                logger.info(f"Successfully extracted Meta AI video: {title}")
-                return jsonify(result)
+            v = video_matches[0]
+            v = v.replace('\\u0026amp;', '&').replace('\\u0026', '&')
+            v = html.unescape(v)
+            
+            result = {
+                'url': v,
+                'title': title,
+                'thumbnail': thumbnail,
+                'duration': 0,
+                'extractor': 'Meta AI',
+                'uploader': 'Meta AI User',
+                'ext': 'mp4',
+                'http_headers': headers,
+                'original_url': url
+            }
+            logger.info(f"Successfully extracted Meta AI video: {title}")
+            return jsonify(result)
         except Exception as e:
             logger.error(f"Error extracting Meta AI video: {e}")
-            return jsonify({'error': str(e)}), 500
-
-    # Custom extraction for TikTok (using TikWM as primary because yt-dlp gets blocked on Datacenter IPs)
-    if 'tiktok.com' in url:
-        try:
-            api_url = "https://www.tikwm.com/api/"
-            data = urllib.parse.urlencode({'url': url, 'count': 12, 'cursor': 0, 'web': 1, 'hd': 1}).encode('utf-8')
-            req = urllib.request.Request(api_url, data=data, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req) as res:
-                tikwm_data = json.loads(res.read().decode())
-                if tikwm_data.get('code') == 0:
-                    video_info = tikwm_data['data']
-                    result = {
-                        'url': video_info.get('play', ''),
-                        'title': video_info.get('title', 'TikTok Video'),
-                        'thumbnail': video_info.get('cover', ''),
-                        'duration': video_info.get('duration', 0),
-                        'extractor': 'TikTok (TikWM)',
-                        'uploader': video_info.get('author', {}).get('nickname', ''),
-                        'ext': 'mp4',
-                        'http_headers': {'User-Agent': 'Mozilla/5.0'},
-                        'original_url': url,
-                        'requires_proxy': True # usually required for tiktok
-                    }
-                    if result['url']:
-                        logger.info(f"Successfully extracted TikTok video: {result['title']}")
-                        return jsonify(result)
-        except Exception as e:
-            logger.warning(f"TikWM extraction failed, falling back to yt-dlp: {e}")
-            # Fall through to yt-dlp
+            return jsonify({'error': str(e)}), 400
 
 
     ydl_opts = {
@@ -128,6 +105,7 @@ def extract_video():
         'skip_download': True,
         'no_color': True,
         'geo_bypass': True,
+        'extractor_args': {'youtube': {'player_client': ['android', 'ios']}}
     }
 
     # Use impersonation and headers for sites that need it to bypass bot detection (YouTube, TikTok, Facebook).
@@ -135,7 +113,7 @@ def extract_video():
     if 'reddit.com' not in url:
         ydl_opts['impersonate'] = ImpersonateTarget(client='chrome')
         ydl_opts['http_headers'] = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9,ar;q=0.8',
             'Sec-Fetch-Mode': 'navigate'
@@ -211,22 +189,52 @@ def extract_video():
     except Exception as e:
         error_msg = str(e)
         
+        # TikWM Fallback for TikTok
+        if 'tiktok.com' in url:
+            logger.warning(f"yt-dlp failed for TikTok, falling back to TikWM: {error_msg}")
+            try:
+                api_url = "https://www.tikwm.com/api/"
+                data = urllib.parse.urlencode({'url': url, 'count': 12, 'cursor': 0, 'web': 1, 'hd': 1}).encode('utf-8')
+                req = urllib.request.Request(api_url, data=data, headers={'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36'})
+                with urllib.request.urlopen(req) as res:
+                    tikwm_data = json.loads(res.read().decode())
+                    if tikwm_data.get('code') == 0:
+                        video_info = tikwm_data['data']
+                        result = {
+                            'url': video_info.get('play', ''),
+                            'title': video_info.get('title', 'TikTok Video'),
+                            'thumbnail': video_info.get('cover', ''),
+                            'duration': video_info.get('duration', 0),
+                            'extractor': 'TikTok (TikWM)',
+                            'uploader': video_info.get('author', {}).get('nickname', ''),
+                            'ext': 'mp4',
+                            'http_headers': {'User-Agent': 'Mozilla/5.0'},
+                            'original_url': url,
+                            'requires_proxy': True
+                        }
+                        if result['url']:
+                            logger.info(f"Successfully extracted TikTok video via fallback: {result['title']}")
+                            return jsonify(result)
+            except Exception as fallback_e:
+                logger.error(f"TikWM Fallback also failed: {fallback_e}")
+                
         # Remove ANSI color codes manually just in case yt-dlp ignores no_color in exception string
         ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
         error_msg = ansi_escape.sub('', error_msg)
         
-        if 'No video formats found' in error_msg or 'Requested format is not available' in error_msg:
+        if 'No video formats found' in error_msg or 'Requested format is not available' in error_msg or 'Sign in to confirm' in error_msg:
             messages = {
-                'en': 'This link does not contain a playable video (it might be an image only), or the account is private and requires login.',
-                'ar': 'هذا الرابط لا يحتوي على مقطع فيديو قابل للتشغيل (قد يكون صورة فقط)، أو أن الحساب خاص ويتطلب تسجيل الدخول.'
+                'en': 'This link does not contain a playable video, or the platform blocked access (e.g. requires login/captcha).',
+                'ar': 'هذا الرابط لا يحتوي على مقطع فيديو قابل للتشغيل، أو أن المنصة حظرت الوصول (قد يتطلب تسجيل الدخول).'
             }
             error_msg = messages.get(lang, messages['ar'])
             
         logger.error(f"Error extracting video from {url}: {error_msg}")
+        # Always return 400 for extraction failures so the app doesn't trigger 500 error handlers
         return jsonify({
             'error': error_msg,
             'details': 'Extraction failed. Please check the URL or try again later.'
-        }), 500
+        }), 400
 
 @app.errorhandler(Exception)
 def handle_exception(e):
