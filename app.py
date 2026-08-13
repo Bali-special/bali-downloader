@@ -26,6 +26,10 @@ app = Flask(__name__)
 # Enable CORS for all routes so our Flutter app can communicate with it
 CORS(app)
 
+@app.route('/')
+def index():
+    return jsonify({'status': 'ok', 'message': 'Super Downloader Backend is running!'})
+
 limiter = Limiter(
     get_remote_address,
     app=app,
@@ -218,9 +222,9 @@ def extract_video():
             except Exception as fallback_e:
                 logger.error(f"TikWM Fallback also failed: {fallback_e}")
                 
-        # Cobalt Fallback for YouTube
-        if 'youtube.com' in url or 'youtu.be' in url:
-            logger.warning(f"yt-dlp failed for YouTube, falling back to Cobalt: {error_msg}")
+        # Cobalt Fallback for YouTube and Dailymotion
+        if 'youtube.com' in url or 'youtu.be' in url or 'dailymotion.com' in url or 'dai.ly' in url:
+            logger.warning(f"yt-dlp failed for {url}, falling back to Cobalt: {error_msg}")
             try:
                 cobalt_api = "https://co.wuk.sh/api/json"
                 data = json.dumps({
@@ -271,8 +275,14 @@ def extract_video():
             'details': 'Extraction failed. Please check the URL or try again later.'
         }), 400
 
+from werkzeug.exceptions import HTTPException
+
 @app.errorhandler(Exception)
 def handle_exception(e):
+    # pass through HTTP errors (like 404, 405)
+    if isinstance(e, HTTPException):
+        return jsonify({'error': str(e)}), e.code
+        
     logger.error(f"Unhandled server error: {str(e)}")
     return jsonify({
         'error': f"Internal Server Error: {str(e)}"
