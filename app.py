@@ -101,6 +101,74 @@ def extract_video():
             logger.error(f"Error extracting Meta AI video: {e}")
             return jsonify({'error': str(e)}), 400
 
+    # Primary extraction for TikTok via TikWM (Render Datacenter IPs are blocked)
+    if 'tiktok.com' in url:
+        try:
+            api_url = "https://www.tikwm.com/api/"
+            data = urllib.parse.urlencode({'url': url, 'count': 12, 'cursor': 0, 'web': 1, 'hd': 1}).encode('utf-8')
+            req = urllib.request.Request(api_url, data=data, headers={'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36'})
+            with urllib.request.urlopen(req) as res:
+                tikwm_data = json.loads(res.read().decode())
+                if tikwm_data.get('code') == 0:
+                    video_info = tikwm_data['data']
+                    result = {
+                        'url': video_info.get('play', ''),
+                        'title': video_info.get('title', 'TikTok Video'),
+                        'thumbnail': video_info.get('cover', ''),
+                        'duration': video_info.get('duration', 0),
+                        'extractor': 'TikTok (TikWM)',
+                        'uploader': video_info.get('author', {}).get('nickname', ''),
+                        'ext': 'mp4',
+                        'http_headers': {'User-Agent': 'Mozilla/5.0'},
+                        'original_url': url,
+                        'requires_proxy': True
+                    }
+                    if result['url']:
+                        logger.info(f"Successfully extracted TikTok video via TikWM directly: {result['title']}")
+                        return jsonify(result)
+                
+                return jsonify({'error': tikwm_data.get('msg', 'Could not find video in TikTok')}), 400
+        except Exception as e:
+            logger.error(f"TikWM direct extraction failed: {e}")
+            return jsonify({'error': f"Failed to extract TikTok video: {str(e)}"}), 400
+
+    # Primary extraction for YouTube and Dailymotion via Cobalt (Render Datacenter IPs are blocked)
+    if 'youtube.com' in url or 'youtu.be' in url or 'dailymotion.com' in url or 'dai.ly' in url:
+        try:
+            cobalt_api = "https://co.wuk.sh/api/json"
+            data = json.dumps({
+                'url': url,
+                'vQuality': '1080'
+            }).encode('utf-8')
+            req = urllib.request.Request(cobalt_api, data=data, headers={
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'User-Agent': 'Mozilla/5.0'
+            })
+            with urllib.request.urlopen(req) as res:
+                cobalt_data = json.loads(res.read().decode())
+                video_url = cobalt_data.get('url')
+                if video_url:
+                    result = {
+                        'url': video_url,
+                        'title': 'Video (Cobalt)',
+                        'thumbnail': '',
+                        'duration': 0,
+                        'extractor': 'Cobalt',
+                        'uploader': '',
+                        'ext': 'mp4',
+                        'http_headers': {},
+                        'original_url': url,
+                        'requires_proxy': False
+                    }
+                    logger.info("Successfully extracted video via Cobalt directly")
+                    return jsonify(result)
+                
+                return jsonify({'error': 'Could not extract video using Cobalt API'}), 400
+        except Exception as e:
+            logger.error(f"Cobalt direct extraction failed: {e}")
+            return jsonify({'error': f"Failed to extract video: {str(e)}"}), 400
+
 
     ydl_opts = {
         'noplaylist': True,
@@ -192,70 +260,6 @@ def extract_video():
 
     except Exception as e:
         error_msg = str(e)
-        
-        # TikWM Fallback for TikTok
-        if 'tiktok.com' in url:
-            logger.warning(f"yt-dlp failed for TikTok, falling back to TikWM: {error_msg}")
-            try:
-                api_url = "https://www.tikwm.com/api/"
-                data = urllib.parse.urlencode({'url': url, 'count': 12, 'cursor': 0, 'web': 1, 'hd': 1}).encode('utf-8')
-                req = urllib.request.Request(api_url, data=data, headers={'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36'})
-                with urllib.request.urlopen(req) as res:
-                    tikwm_data = json.loads(res.read().decode())
-                    if tikwm_data.get('code') == 0:
-                        video_info = tikwm_data['data']
-                        result = {
-                            'url': video_info.get('play', ''),
-                            'title': video_info.get('title', 'TikTok Video'),
-                            'thumbnail': video_info.get('cover', ''),
-                            'duration': video_info.get('duration', 0),
-                            'extractor': 'TikTok (TikWM)',
-                            'uploader': video_info.get('author', {}).get('nickname', ''),
-                            'ext': 'mp4',
-                            'http_headers': {'User-Agent': 'Mozilla/5.0'},
-                            'original_url': url,
-                            'requires_proxy': True
-                        }
-                        if result['url']:
-                            logger.info(f"Successfully extracted TikTok video via fallback: {result['title']}")
-                            return jsonify(result)
-            except Exception as fallback_e:
-                logger.error(f"TikWM Fallback also failed: {fallback_e}")
-                
-        # Cobalt Fallback for YouTube and Dailymotion
-        if 'youtube.com' in url or 'youtu.be' in url or 'dailymotion.com' in url or 'dai.ly' in url:
-            logger.warning(f"yt-dlp failed for {url}, falling back to Cobalt: {error_msg}")
-            try:
-                cobalt_api = "https://co.wuk.sh/api/json"
-                data = json.dumps({
-                    'url': url,
-                    'vQuality': '1080'
-                }).encode('utf-8')
-                req = urllib.request.Request(cobalt_api, data=data, headers={
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json',
-                    'User-Agent': 'Mozilla/5.0'
-                })
-                with urllib.request.urlopen(req) as res:
-                    cobalt_data = json.loads(res.read().decode())
-                    video_url = cobalt_data.get('url')
-                    if video_url:
-                        result = {
-                            'url': video_url,
-                            'title': 'YouTube Video',
-                            'thumbnail': '',
-                            'duration': 0,
-                            'extractor': 'YouTube (Cobalt)',
-                            'uploader': '',
-                            'ext': 'mp4',
-                            'http_headers': {},
-                            'original_url': url,
-                            'requires_proxy': False
-                        }
-                        logger.info("Successfully extracted YouTube video via Cobalt fallback")
-                        return jsonify(result)
-            except Exception as cobalt_e:
-                logger.error(f"Cobalt Fallback also failed: {cobalt_e}")
                 
         # Remove ANSI color codes manually just in case yt-dlp ignores no_color in exception string
         ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
