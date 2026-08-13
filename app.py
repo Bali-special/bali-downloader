@@ -126,9 +126,10 @@ def extract_video_internal():
     ]
     if any(domain in url for domain in social_domains):
         instances = [
-            ("cobalt", "https://api.cobalt.tools/api/json"),
-            ("cobalt", "https://co.wuk.sh/api/json"),
-            ("cobalt", "https://cobalt.q0.zone/api/json")
+            ("cobalt", "https://co.wuk.sh"),
+            ("cobalt", "https://cobalt.ooguy.com"),
+            ("cobalt", "https://cobalt.kwiatekmr.me"),
+            ("cobalt", "https://dl.khub.app")
         ]
         
         # YouTube has dedicated Invidious and Piped instances that we prioritize
