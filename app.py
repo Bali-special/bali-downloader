@@ -74,15 +74,12 @@ def extract_video():
             thumb_match = re.search(r'<meta property="og:image" content="([^"]+)"', html_content)
             thumbnail = html.unescape(thumb_match.group(1)) if thumb_match else ''
             
-            # Find video URL
-            # Look for video URLs that end in .mp4 or .webm but might have query parameters
-            video_matches = re.findall(r'(https://[^"\']+\.mp4[^"\']*)', html_content)
-            if not video_matches:
+            # Find video URL via og:video
+            video_match = re.search(r'<meta\s+property=["\']og:video(?::secure_url)?["\']\s+content=["\']([^"\']+)["\']', html_content, re.IGNORECASE)
+            if not video_match:
                 return jsonify({'error': 'Could not find video in Meta AI page'}), 400
                 
-            v = video_matches[0]
-            v = v.replace('\\u0026amp;', '&').replace('\\u0026', '&')
-            v = html.unescape(v)
+            v = html.unescape(video_match.group(1))
             
             result = {
                 'url': v,
@@ -135,48 +132,90 @@ def extract_video():
                 logger.error(f"TikWM extraction failed on {api_url}: {e}")
         logger.warning("All TikWM APIs failed. Falling back to yt-dlp.")
 
-    # Primary extraction for YouTube and Dailymotion via Cobalt (Render Datacenter IPs are blocked)
-    if 'youtube.com' in url or 'youtu.be' in url or 'dailymotion.com' in url or 'dai.ly' in url:
-        cobalt_instances = [
-            "https://api.cobalt.tools/api/json",
-            "https://co.wuk.sh/api/json",
-            "https://cobalt.q0.zone/api/json",
-            "https://api.cobalt.tools/"
-        ]
-        for instance in cobalt_instances:
-            try:
-                headers = {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json',
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-                }
-                payload = {'url': url, 'vQuality': '1080'}
-                response = requests.post(instance, json=payload, headers=headers, timeout=10)
-                response.raise_for_status()
-                cobalt_data = response.json()
+    # Primary extraction for YouTube via Piped API (Render Datacenter IPs are blocked)
+    if 'youtube.com' in url or 'youtu.be' in url:
+        try:
+            video_id = None
+            if 'youtu.be/' in url:
+                video_id = url.split('youtu.be/')[1].split('?')[0]
+            elif 'youtube.com/watch' in url:
+                parsed_url = urllib.parse.urlparse(url)
+                video_id = urllib.parse.parse_qs(parsed_url.query).get('v', [None])[0]
+            elif 'youtube.com/shorts/' in url:
+                video_id = url.split('youtube.com/shorts/')[1].split('?')[0]
                 
-                # Some Cobalt instances return status 'redirect' or 'stream' with the url in 'url'
-                video_url = cobalt_data.get('url')
-                if video_url:
-                    result = {
-                        'url': video_url,
-                        'title': 'Video (Cobalt)',
-                        'thumbnail': '',
-                        'duration': 0,
-                        'extractor': 'Cobalt',
-                        'uploader': '',
-                        'ext': 'mp4',
-                        'http_headers': {},
-                        'original_url': url,
-                        'requires_proxy': False
-                    }
-                    logger.info(f"Successfully extracted video via Cobalt ({instance})")
-                    return jsonify(result)
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Cobalt network error on {instance}: {e}")
-            except Exception as e:
-                logger.error(f"Cobalt extraction failed on {instance}: {e}")
-        logger.warning("All Cobalt APIs failed. Falling back to yt-dlp.")
+            if video_id:
+                piped_api = f"https://pipedapi.kavin.rocks/streams/{video_id}"
+                res = requests.get(piped_api, timeout=10)
+                res.raise_for_status()
+                data = res.json()
+                
+                streams = data.get('videoStreams', [])
+                if streams:
+                    valid_streams = [s for s in streams if not s.get('videoOnly') and s.get('format') == 'MPEG_4']
+                    if not valid_streams:
+                        valid_streams = [s for s in streams if not s.get('videoOnly')]
+                        
+                    if valid_streams:
+                        valid_streams.sort(key=lambda x: int(str(x.get('quality', '0')).replace('p','')) if str(x.get('quality', '0')).replace('p','').isdigit() else 0, reverse=True)
+                        video_url = valid_streams[0].get('url')
+                        
+                        if video_url:
+                            result = {
+                                'url': video_url,
+                                'title': data.get('title', 'YouTube Video (Piped)'),
+                                'thumbnail': data.get('thumbnailUrl', ''),
+                                'duration': data.get('duration', 0),
+                                'extractor': 'YouTube (Piped)',
+                                'uploader': data.get('uploader', ''),
+                                'ext': 'mp4',
+                                'http_headers': {},
+                                'original_url': url,
+                                'requires_proxy': False
+                            }
+                            logger.info("Successfully extracted YouTube video via Piped directly")
+                            return jsonify(result)
+        except Exception as e:
+            logger.error(f"Piped extraction failed: {e}")
+
+    # Primary extraction for Dailymotion via Embed API
+    if 'dailymotion.com' in url or 'dai.ly' in url:
+        try:
+            video_id = None
+            if 'dai.ly/' in url:
+                video_id = url.split('dai.ly/')[1].split('?')[0]
+            elif 'dailymotion.com/video/' in url:
+                video_id = url.split('dailymotion.com/video/')[1].split('?')[0]
+                
+            if video_id:
+                embed_url = f"https://www.dailymotion.com/embed/video/{video_id}"
+                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+                res = requests.get(embed_url, headers=headers, timeout=10)
+                res.raise_for_status()
+                
+                config_match = re.search(r'__PLAYER_CONFIG__\s*=\s*(\{.*?\});', res.text)
+                if config_match:
+                    config = json.loads(config_match.group(1))
+                    qualities = config.get('metadata', {}).get('qualities', {})
+                    if 'auto' in qualities:
+                        for item in qualities['auto']:
+                            if item.get('type') == 'application/x-mpegURL':
+                                result = {
+                                    'url': item.get('url'),
+                                    'title': config.get('metadata', {}).get('title', 'Dailymotion Video'),
+                                    'thumbnail': config.get('metadata', {}).get('posters', {}).get('60', ''),
+                                    'duration': config.get('metadata', {}).get('duration', 0),
+                                    'extractor': 'Dailymotion',
+                                    'uploader': config.get('metadata', {}).get('owner', {}).get('screenname', ''),
+                                    'ext': 'mp4',
+                                    'http_headers': {},
+                                    'original_url': url,
+                                    'requires_proxy': False
+                                }
+                                logger.info("Successfully extracted Dailymotion video via Embed directly")
+                                return jsonify(result)
+        except Exception as e:
+            logger.error(f"Dailymotion extraction failed: {e}")
 
 
     ydl_opts = {
