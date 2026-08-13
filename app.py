@@ -200,7 +200,7 @@ def extract_video():
                         'Content-Type': 'application/json',
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
                     }
-                    payload = {'url': url, 'vQuality': '1080'}
+                    payload = {'url': url}
                     res = requests.post(api_base, json=payload, headers=headers, timeout=10)
                     res.raise_for_status()
                     cobalt_data = res.json()
