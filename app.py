@@ -218,6 +218,41 @@ def extract_video():
             except Exception as fallback_e:
                 logger.error(f"TikWM Fallback also failed: {fallback_e}")
                 
+        # Cobalt Fallback for YouTube
+        if 'youtube.com' in url or 'youtu.be' in url:
+            logger.warning(f"yt-dlp failed for YouTube, falling back to Cobalt: {error_msg}")
+            try:
+                cobalt_api = "https://co.wuk.sh/api/json"
+                data = json.dumps({
+                    'url': url,
+                    'vQuality': '1080'
+                }).encode('utf-8')
+                req = urllib.request.Request(cobalt_api, data=data, headers={
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'Mozilla/5.0'
+                })
+                with urllib.request.urlopen(req) as res:
+                    cobalt_data = json.loads(res.read().decode())
+                    video_url = cobalt_data.get('url')
+                    if video_url:
+                        result = {
+                            'url': video_url,
+                            'title': 'YouTube Video',
+                            'thumbnail': '',
+                            'duration': 0,
+                            'extractor': 'YouTube (Cobalt)',
+                            'uploader': '',
+                            'ext': 'mp4',
+                            'http_headers': {},
+                            'original_url': url,
+                            'requires_proxy': False
+                        }
+                        logger.info("Successfully extracted YouTube video via Cobalt fallback")
+                        return jsonify(result)
+            except Exception as cobalt_e:
+                logger.error(f"Cobalt Fallback also failed: {cobalt_e}")
+                
         # Remove ANSI color codes manually just in case yt-dlp ignores no_color in exception string
         ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
         error_msg = ansi_escape.sub('', error_msg)
