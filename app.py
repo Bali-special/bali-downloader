@@ -89,6 +89,8 @@ def extract_video_internal():
             if not video_match:
                 video_matches = re.findall(r'(https://[^"\']+\.mp4[^"\']*)', html_content)
                 if not video_matches:
+                    logger.error(f"Meta AI Extraction failed. Could not find any video tag or .mp4 URL.")
+                    logger.error(f"Meta AI HTML Response (First 1000 chars): {html_content[:1000]}")
                     return jsonify({'error': 'Could not find video in Meta AI page'}), 400
                 v = video_matches[0].replace('\\u0026amp;', '&').replace('\\u0026', '&')
                 v = html.unescape(v)
@@ -243,11 +245,15 @@ def extract_video_internal():
                         }
                         logger.info(f"Successfully extracted video via Cobalt ({api_base})")
                         return jsonify(result)
+                    else:
+                        logger.error(f"Cobalt {api_base} succeeded but returned no 'url'. Response: {json.dumps(cobalt_data)}")
             except requests.exceptions.RequestException as e:
                 err_text = e.response.text if getattr(e, 'response', None) else 'No response body'
-                logger.error(f"Fallback {inst_type} network error on {api_base}: {e}, Response: {err_text}")
+                logger.error(f"EXPLICIT LOG: Fallback {inst_type} network error on {api_base}. Status Code: {getattr(e.response, 'status_code', 'N/A')}. Response Body: {err_text}")
+                print(f"FAILED {inst_type} {api_base} -> Status: {getattr(e.response, 'status_code', 'N/A')} Body: {err_text}")
             except Exception as e:
-                logger.error(f"Fallback {inst_type} extraction failed on {api_base}: {e}")
+                logger.error(f"EXPLICIT LOG: Fallback {inst_type} extraction failed on {api_base}: {str(e)}")
+                print(f"FAILED {inst_type} {api_base} -> Exception: {str(e)}")
         logger.warning("All Fallbacks failed. Falling back to yt-dlp.")
 
 
