@@ -47,6 +47,16 @@ def require_api_key():
 
 @app.route('/api/extract', methods=['POST'])
 def extract_video():
+    try:
+        return extract_video_internal()
+    except Exception as fatal_error:
+        logger.error(f"FATAL unhandled exception in extract_video: {fatal_error}", exc_info=True)
+        return jsonify({
+            'error': str(fatal_error),
+            'details': 'A critical error occurred processing your request.'
+        }), 400
+
+def extract_video_internal():
     data = request.get_json()
     if not data or 'url' not in data:
         return jsonify({'error': 'URL parameter is required'}), 400
@@ -135,10 +145,11 @@ def extract_video():
                 logger.error(f"TikWM network error on {api_url}: {e}, Response: {err_text}")
             except Exception as e:
                 logger.error(f"TikWM extraction failed on {api_url}: {e}")
-        logger.warning("All TikWM APIs failed. Falling back to yt-dlp.")
+        logger.warning("All TikWM APIs failed. Falling back to Cobalt/yt-dlp.")
 
-    # Primary extraction for YouTube via Piped/Cobalt APIs (Render Datacenter IPs are blocked)
-    if 'youtube.com' in url or 'youtu.be' in url:
+    # Primary extraction for YouTube, Facebook, Instagram, Twitter, Reddit, Pinterest via Piped/Cobalt APIs (Render Datacenter IPs are blocked)
+    social_domains = ['youtube.com', 'youtu.be', 'facebook.com', 'fb.watch', 'fb.com', 'instagram.com', 'twitter.com', 'x.com', 'reddit.com', 'pinterest.com', 'pin.it']
+    if any(domain in url for domain in social_domains):
         instances = [
             ("piped", "https://pipedapi.kavin.rocks"),
             ("piped", "https://pipedapi.moomoo.me"),
@@ -181,7 +192,7 @@ def extract_video():
                             if video_url:
                                 result = {
                                     'url': video_url,
-                                    'title': data.get('title', 'YouTube Video (Piped)'),
+                                    'title': data.get('title', 'Video (Piped)'),
                                     'thumbnail': data.get('thumbnailUrl', ''),
                                     'duration': data.get('duration', 0),
                                     'extractor': f'YouTube (Piped - {api_base})',
@@ -191,10 +202,11 @@ def extract_video():
                                     'original_url': url,
                                     'requires_proxy': False
                                 }
-                                logger.info(f"Successfully extracted YouTube video via {api_base} directly")
+                                logger.info(f"Successfully extracted video via {api_base} directly")
                                 return jsonify(result)
                                 
                 elif inst_type == "cobalt":
+                    # Cobalt handles almost all social platforms
                     headers = {
                         'Accept': 'application/json',
                         'Content-Type': 'application/json',
@@ -209,7 +221,7 @@ def extract_video():
                     if video_url:
                         result = {
                             'url': video_url,
-                            'title': 'YouTube Video (Cobalt)',
+                            'title': 'Social Video (Cobalt)',
                             'thumbnail': '',
                             'duration': 0,
                             'extractor': f'Cobalt ({api_base})',
@@ -223,10 +235,10 @@ def extract_video():
                         return jsonify(result)
             except requests.exceptions.RequestException as e:
                 err_text = e.response.text if getattr(e, 'response', None) else 'No response body'
-                logger.error(f"YouTube {inst_type} network error on {api_base}: {e}, Response: {err_text}")
+                logger.error(f"Fallback {inst_type} network error on {api_base}: {e}, Response: {err_text}")
             except Exception as e:
-                logger.error(f"YouTube {inst_type} extraction failed on {api_base}: {e}")
-        logger.warning("All YouTube Fallbacks failed. Falling back to yt-dlp.")
+                logger.error(f"Fallback {inst_type} extraction failed on {api_base}: {e}")
+        logger.warning("All Cobalt/Piped Fallbacks failed. Falling back to yt-dlp.")
 
     # Primary extraction for Dailymotion via Embed API
     if 'dailymotion.com' in url or 'dai.ly' in url:
