@@ -103,12 +103,15 @@ def extract_video():
 
     # Primary extraction for TikTok via TikWM (Render Datacenter IPs are blocked)
     if 'tiktok.com' in url:
-        try:
-            api_url = "https://www.tikwm.com/api/"
-            data = urllib.parse.urlencode({'url': url, 'count': 12, 'cursor': 0, 'web': 1, 'hd': 1}).encode('utf-8')
-            req = urllib.request.Request(api_url, data=data, headers={'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36'})
-            with urllib.request.urlopen(req) as res:
-                tikwm_data = json.loads(res.read().decode())
+        tikwm_urls = ["https://www.tikwm.com/api/", "https://tikwm.com/api/"]
+        for api_url in tikwm_urls:
+            try:
+                headers = {'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36'}
+                data = {'url': url, 'count': 12, 'cursor': 0, 'web': 1, 'hd': 1}
+                response = requests.post(api_url, data=data, headers=headers, timeout=10)
+                response.raise_for_status()
+                tikwm_data = response.json()
+                
                 if tikwm_data.get('code') == 0:
                     video_info = tikwm_data['data']
                     result = {
@@ -124,29 +127,35 @@ def extract_video():
                         'requires_proxy': True
                     }
                     if result['url']:
-                        logger.info(f"Successfully extracted TikTok video via TikWM directly: {result['title']}")
+                        logger.info(f"Successfully extracted TikTok video via {api_url}")
                         return jsonify(result)
-                
-                return jsonify({'error': tikwm_data.get('msg', 'Could not find video in TikTok')}), 400
-        except Exception as e:
-            logger.error(f"TikWM direct extraction failed: {e}")
-            return jsonify({'error': f"Failed to extract TikTok video: {str(e)}"}), 400
+            except requests.exceptions.RequestException as e:
+                logger.error(f"TikWM network error on {api_url}: {e}")
+            except Exception as e:
+                logger.error(f"TikWM extraction failed on {api_url}: {e}")
+        logger.warning("All TikWM APIs failed. Falling back to yt-dlp.")
 
     # Primary extraction for YouTube and Dailymotion via Cobalt (Render Datacenter IPs are blocked)
     if 'youtube.com' in url or 'youtu.be' in url or 'dailymotion.com' in url or 'dai.ly' in url:
-        try:
-            cobalt_api = "https://co.wuk.sh/api/json"
-            data = json.dumps({
-                'url': url,
-                'vQuality': '1080'
-            }).encode('utf-8')
-            req = urllib.request.Request(cobalt_api, data=data, headers={
-                'Accept': 'application/json',
-                'Content-Type': 'application/json',
-                'User-Agent': 'Mozilla/5.0'
-            })
-            with urllib.request.urlopen(req) as res:
-                cobalt_data = json.loads(res.read().decode())
+        cobalt_instances = [
+            "https://api.cobalt.tools/api/json",
+            "https://co.wuk.sh/api/json",
+            "https://cobalt.q0.zone/api/json",
+            "https://api.cobalt.tools/"
+        ]
+        for instance in cobalt_instances:
+            try:
+                headers = {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+                }
+                payload = {'url': url, 'vQuality': '1080'}
+                response = requests.post(instance, json=payload, headers=headers, timeout=10)
+                response.raise_for_status()
+                cobalt_data = response.json()
+                
+                # Some Cobalt instances return status 'redirect' or 'stream' with the url in 'url'
                 video_url = cobalt_data.get('url')
                 if video_url:
                     result = {
@@ -161,13 +170,13 @@ def extract_video():
                         'original_url': url,
                         'requires_proxy': False
                     }
-                    logger.info("Successfully extracted video via Cobalt directly")
+                    logger.info(f"Successfully extracted video via Cobalt ({instance})")
                     return jsonify(result)
-                
-                return jsonify({'error': 'Could not extract video using Cobalt API'}), 400
-        except Exception as e:
-            logger.error(f"Cobalt direct extraction failed: {e}")
-            return jsonify({'error': f"Failed to extract video: {str(e)}"}), 400
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Cobalt network error on {instance}: {e}")
+            except Exception as e:
+                logger.error(f"Cobalt extraction failed on {instance}: {e}")
+        logger.warning("All Cobalt APIs failed. Falling back to yt-dlp.")
 
 
     ydl_opts = {
