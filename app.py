@@ -84,12 +84,16 @@ def extract_video_internal():
             thumb_match = re.search(r'<meta property="og:image" content="([^"]+)"', html_content)
             thumbnail = html.unescape(thumb_match.group(1)) if thumb_match else ''
             
-            # Find video URL via og:video
+            # Find video URL via og:video or fallback regex
             video_match = re.search(r'<meta\s+property=["\']og:video(?::secure_url)?["\']\s+content=["\']([^"\']+)["\']', html_content, re.IGNORECASE)
             if not video_match:
-                return jsonify({'error': 'Could not find video in Meta AI page'}), 400
-                
-            v = html.unescape(video_match.group(1))
+                video_matches = re.findall(r'(https://[^"\']+\.mp4[^"\']*)', html_content)
+                if not video_matches:
+                    return jsonify({'error': 'Could not find video in Meta AI page'}), 400
+                v = video_matches[0].replace('\\u0026amp;', '&').replace('\\u0026', '&')
+                v = html.unescape(v)
+            else:
+                v = html.unescape(video_match.group(1))
             
             result = {
                 'url': v,
@@ -112,56 +116,62 @@ def extract_video_internal():
             logger.error(f"Error extracting Meta AI video: {e}")
             return jsonify({'error': str(e)}), 400
 
-    # Primary extraction for TikTok via TikWM (Render Datacenter IPs are blocked)
-    if 'tiktok.com' in url:
-        tikwm_urls = ["https://www.tikwm.com/api/", "https://tikwm.com/api/"]
-        for api_url in tikwm_urls:
-            try:
-                headers = {'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36'}
-                data = {'url': url, 'count': 12, 'cursor': 0, 'web': 1, 'hd': 1}
-                response = requests.post(api_url, data=data, headers=headers, timeout=10)
-                response.raise_for_status()
-                tikwm_data = response.json()
-                
-                if tikwm_data.get('code') == 0:
-                    video_info = tikwm_data['data']
-                    result = {
-                        'url': video_info.get('play', ''),
-                        'title': video_info.get('title', 'TikTok Video'),
-                        'thumbnail': video_info.get('cover', ''),
-                        'duration': video_info.get('duration', 0),
-                        'extractor': 'TikTok (TikWM)',
-                        'uploader': video_info.get('author', {}).get('nickname', ''),
-                        'ext': 'mp4',
-                        'http_headers': {'User-Agent': 'Mozilla/5.0'},
-                        'original_url': url,
-                        'requires_proxy': True
-                    }
-                    if result['url']:
-                        logger.info(f"Successfully extracted TikTok video via {api_url}")
-                        return jsonify(result)
-            except requests.exceptions.RequestException as e:
-                err_text = e.response.text if getattr(e, 'response', None) else 'No response body'
-                logger.error(f"TikWM network error on {api_url}: {e}, Response: {err_text}")
-            except Exception as e:
-                logger.error(f"TikWM extraction failed on {api_url}: {e}")
-        logger.warning("All TikWM APIs failed. Falling back to Cobalt/yt-dlp.")
-
-    # Primary extraction for YouTube, Facebook, Instagram, Twitter, Reddit, Pinterest via Piped/Cobalt APIs (Render Datacenter IPs are blocked)
-    social_domains = ['youtube.com', 'youtu.be', 'facebook.com', 'fb.watch', 'fb.com', 'instagram.com', 'twitter.com', 'x.com', 'reddit.com', 'pinterest.com', 'pin.it']
+    # Primary extraction for social platforms via Cobalt/Piped/Invidious APIs (Render Datacenter IPs are blocked)
+    social_domains = [
+        'youtube.com', 'youtu.be', 'facebook.com', 'fb.watch', 'fb.com', 
+        'instagram.com', 'twitter.com', 'x.com', 'reddit.com', 'pinterest.com', 'pin.it',
+        'tiktok.com', 'dailymotion.com', 'dai.ly'
+    ]
     if any(domain in url for domain in social_domains):
         instances = [
-            ("piped", "https://pipedapi.kavin.rocks"),
-            ("piped", "https://pipedapi.moomoo.me"),
-            ("piped", "https://pipedapi.syncpundit.io"),
             ("cobalt", "https://api.cobalt.tools/api/json"),
             ("cobalt", "https://co.wuk.sh/api/json"),
             ("cobalt", "https://cobalt.q0.zone/api/json")
         ]
         
+        # YouTube has dedicated Invidious and Piped instances that we prioritize
+        if 'youtube.com' in url or 'youtu.be' in url:
+            instances = [
+                ("invidious", "https://vid.puffyan.us"),
+                ("invidious", "https://invidious.nerdvpn.de"),
+                ("invidious", "https://invidious.privacydev.net"),
+                ("piped", "https://pipedapi.kavin.rocks"),
+                ("piped", "https://pipedapi.syncpundit.io")
+            ] + instances
+
         for inst_type, api_base in instances:
             try:
-                if inst_type == "piped":
+                if inst_type == "invidious":
+                    video_id = None
+                    if 'youtu.be/' in url: video_id = url.split('youtu.be/')[1].split('?')[0]
+                    elif 'youtube.com/watch' in url: video_id = urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get('v', [None])[0]
+                    elif 'youtube.com/shorts/' in url: video_id = url.split('youtube.com/shorts/')[1].split('?')[0]
+                    
+                    if not video_id: continue
+                        
+                    res = requests.get(f"{api_base}/api/v1/videos/{video_id}", timeout=10)
+                    res.raise_for_status()
+                    data = res.json()
+                    formats = data.get('formatStreams', [])
+                    if formats:
+                        video_url = formats[-1].get('url') # Get highest quality format
+                        if video_url:
+                            result = {
+                                'url': video_url,
+                                'title': data.get('title', 'Video (Invidious)'),
+                                'thumbnail': data.get('videoThumbnails', [{}])[0].get('url', ''),
+                                'duration': data.get('lengthSeconds', 0),
+                                'extractor': f'YouTube (Invidious - {api_base})',
+                                'uploader': data.get('author', ''),
+                                'ext': 'mp4',
+                                'http_headers': {},
+                                'original_url': url,
+                                'requires_proxy': False
+                            }
+                            logger.info(f"Successfully extracted video via {api_base} directly")
+                            return jsonify(result)
+
+                elif inst_type == "piped":
                     video_id = None
                     if 'youtu.be/' in url:
                         video_id = url.split('youtu.be/')[1].split('?')[0]
@@ -238,49 +248,7 @@ def extract_video_internal():
                 logger.error(f"Fallback {inst_type} network error on {api_base}: {e}, Response: {err_text}")
             except Exception as e:
                 logger.error(f"Fallback {inst_type} extraction failed on {api_base}: {e}")
-        logger.warning("All Cobalt/Piped Fallbacks failed. Falling back to yt-dlp.")
-
-    # Primary extraction for Dailymotion via Embed API
-    if 'dailymotion.com' in url or 'dai.ly' in url:
-        try:
-            video_id = None
-            if 'dai.ly/' in url:
-                video_id = url.split('dai.ly/')[1].split('?')[0]
-            elif 'dailymotion.com/video/' in url:
-                video_id = url.split('dailymotion.com/video/')[1].split('?')[0]
-                
-            if video_id:
-                embed_url = f"https://www.dailymotion.com/embed/video/{video_id}"
-                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-                res = requests.get(embed_url, headers=headers, timeout=10)
-                res.raise_for_status()
-                
-                config_match = re.search(r'__PLAYER_CONFIG__\s*=\s*(\{.*?\});', res.text)
-                if config_match:
-                    config = json.loads(config_match.group(1))
-                    qualities = config.get('metadata', {}).get('qualities', {})
-                    if 'auto' in qualities:
-                        for item in qualities['auto']:
-                            if item.get('type') == 'application/x-mpegURL':
-                                result = {
-                                    'url': item.get('url'),
-                                    'title': config.get('metadata', {}).get('title', 'Dailymotion Video'),
-                                    'thumbnail': config.get('metadata', {}).get('posters', {}).get('60', ''),
-                                    'duration': config.get('metadata', {}).get('duration', 0),
-                                    'extractor': 'Dailymotion',
-                                    'uploader': config.get('metadata', {}).get('owner', {}).get('screenname', ''),
-                                    'ext': 'mp4',
-                                    'http_headers': {},
-                                    'original_url': url,
-                                    'requires_proxy': False
-                                }
-                                logger.info("Successfully extracted Dailymotion video via Embed directly")
-                                return jsonify(result)
-        except requests.exceptions.RequestException as e:
-            err_text = e.response.text if getattr(e, 'response', None) else 'No response body'
-            logger.error(f"Dailymotion network error: {e}, Response: {err_text}")
-        except Exception as e:
-            logger.error(f"Dailymotion extraction failed: {e}")
+        logger.warning("All Fallbacks failed. Falling back to yt-dlp.")
 
 
     ydl_opts = {
