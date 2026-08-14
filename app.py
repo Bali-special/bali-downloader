@@ -398,19 +398,40 @@ def proxy_download():
         temp_dir = tempfile.gettempdir()
         temp_filename = os.path.join(temp_dir, f"proxy_{int(time.time())}.mp4")
         
-        ydl_opts = {
-            'format': 'bestvideo+bestaudio/best',
-            'outtmpl': temp_filename,
-            'quiet': True,
-            'no_warnings': True,
-            'geo_bypass': True,
-        }
-        
-        if 'reddit.com' not in video_url:
-            ydl_opts['impersonate'] = ImpersonateTarget(client='chrome')
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([video_url])
+        # If TikTok, use tikwm directly to download instead of yt-dlp to bypass render block
+        if 'tiktok.com' in video_url:
+            from curl_cffi import requests as cffi_requests
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
+                'Accept': 'application/json'
+            }
+            res = cffi_requests.post("https://www.tikwm.com/api/", data={'url': video_url}, headers=headers, impersonate="chrome110", timeout=15)
+            res.raise_for_status()
+            data = res.json()
+            if data.get('code') == 0 and 'data' in data and 'play' in data['data']:
+                play_url = data['data']['play']
+                import requests
+                req_stream = requests.get(play_url, stream=True, headers={'User-Agent': headers['User-Agent']}, timeout=30)
+                req_stream.raise_for_status()
+                with open(temp_filename, 'wb') as f:
+                    for chunk in req_stream.iter_content(chunk_size=8192):
+                        f.write(chunk)
+            else:
+                return "Failed to extract TikTok via tikwm in proxy", 500
+        else:
+            ydl_opts = {
+                'format': 'bestvideo+bestaudio/best',
+                'outtmpl': temp_filename,
+                'quiet': True,
+                'no_warnings': True,
+                'geo_bypass': True,
+            }
+            
+            if 'reddit.com' not in video_url:
+                ydl_opts['impersonate'] = ImpersonateTarget(client='chrome')
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([video_url])
             
         if not os.path.exists(temp_filename):
             return "Download failed", 500
