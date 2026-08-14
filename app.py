@@ -7,6 +7,7 @@ import urllib.request
 import urllib.parse
 import json
 import requests
+from curl_cffi import requests as cffi_requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -152,7 +153,7 @@ def extract_video_internal():
                     
                     if not video_id: continue
                         
-                    res = requests.get(f"{api_base}/api/v1/videos/{video_id}", timeout=10)
+                    res = cffi_requests.get(f"{api_base}/api/v1/videos/{video_id}", impersonate="chrome110", timeout=10)
                     res.raise_for_status()
                     data = res.json()
                     formats = data.get('formatStreams', [])
@@ -187,8 +188,7 @@ def extract_video_internal():
                     if not video_id:
                         continue
                         
-                    piped_api = f"{api_base}/streams/{video_id}"
-                    res = requests.get(piped_api, timeout=10)
+                    res = cffi_requests.get(f"{api_base}/streams/{video_id}", impersonate="chrome110", timeout=10)
                     res.raise_for_status()
                     data = res.json()
                     
@@ -226,7 +226,7 @@ def extract_video_internal():
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
                     }
                     payload = {'url': url}
-                    res = requests.post(api_base, json=payload, headers=headers, timeout=10)
+                    res = cffi_requests.post(api_base, json=payload, headers=headers, impersonate="chrome110", timeout=10)
                     res.raise_for_status()
                     cobalt_data = res.json()
                     
@@ -248,13 +248,12 @@ def extract_video_internal():
                         return jsonify(result)
                     else:
                         logger.error(f"Cobalt {api_base} succeeded but returned no 'url'. Response: {json.dumps(cobalt_data)}")
-            except requests.exceptions.RequestException as e:
-                err_text = e.response.text if getattr(e, 'response', None) else 'No response body'
-                logger.error(f"EXPLICIT LOG: Fallback {inst_type} network error on {api_base}. Status Code: {getattr(e.response, 'status_code', 'N/A')}. Response Body: {err_text}")
-                print(f"FAILED {inst_type} {api_base} -> Status: {getattr(e.response, 'status_code', 'N/A')} Body: {err_text}")
             except Exception as e:
-                logger.error(f"EXPLICIT LOG: Fallback {inst_type} extraction failed on {api_base}: {str(e)}")
-                print(f"FAILED {inst_type} {api_base} -> Exception: {str(e)}")
+                # Catch both requests and cffi_requests exceptions
+                err_text = getattr(getattr(e, 'response', None), 'text', 'No response body')
+                status_code = getattr(getattr(e, 'response', None), 'status_code', 'N/A')
+                logger.error(f"EXPLICIT LOG: Fallback {inst_type} extraction failed on {api_base}. Exception: {str(e)}. Status Code: {status_code}. Response Body: {err_text}")
+                print(f"FAILED {inst_type} {api_base} -> Exception: {str(e)} Status: {status_code} Body: {err_text}")
         logger.warning("All Fallbacks failed. Falling back to yt-dlp.")
 
 
