@@ -243,7 +243,7 @@ def extract_video_internal():
                             'thumbnail': data['data'].get('cover', ''),
                             'duration': data['data'].get('duration', 0),
                             'extractor': 'TikTok (tikwm)',
-                            'uploader': data['data'].get('author', {}).get('nickname', ''),
+                            'uploader': data['data'].get('author', {}).get('nickname', '') if isinstance(data['data'].get('author'), dict) else '',
                             'ext': 'mp4',
                             'http_headers': {},
                             'original_url': url,
@@ -352,23 +352,15 @@ def extract_video_internal():
 
     except Exception as e:
         error_msg = str(e)
-                
         # Remove ANSI color codes manually just in case yt-dlp ignores no_color in exception string
         ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
         error_msg = ansi_escape.sub('', error_msg)
         
-        if 'No video formats found' in error_msg or 'Requested format is not available' in error_msg or 'Sign in to confirm' in error_msg:
-            messages = {
-                'en': 'This link does not contain a playable video, or the platform blocked access (e.g. requires login/captcha).',
-                'ar': 'هذا الرابط لا يحتوي على مقطع فيديو قابل للتشغيل، أو أن المنصة حظرت الوصول (قد يتطلب تسجيل الدخول).'
-            }
-            error_msg = messages.get(lang, messages['ar'])
-            
         logger.error(f"Error extracting video from {url}: {error_msg}")
         # Always return 400 for extraction failures so the app doesn't trigger 500 error handlers
         return jsonify({
-            'error': error_msg,
-            'details': 'Extraction failed. Please check the URL or try again later.'
+            'error': 'حدث خطأ أثناء جلب الفيديو. قد يكون السيرفر محظوراً من قبل المنصة.' if lang == 'ar' else 'Error fetching video. The server might be blocked by the platform.',
+            'details': error_msg
         }), 400
 
 from werkzeug.exceptions import HTTPException
