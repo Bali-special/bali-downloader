@@ -135,12 +135,7 @@ def extract_video_internal():
         'tiktok.com', 'dailymotion.com', 'dai.ly'
     ]
     if any(domain in url for domain in social_domains):
-        instances = [
-            ("cobalt", "https://co.wuk.sh"),
-            ("cobalt", "https://cobalt.ooguy.com"),
-            ("cobalt", "https://cobalt.kwiatekmr.me"),
-            ("cobalt", "https://dl.khub.app")
-        ]
+        instances = []
         
         # YouTube has dedicated Invidious and Piped instances that we prioritize
         if 'youtube.com' in url or 'youtu.be' in url:
@@ -150,6 +145,10 @@ def extract_video_internal():
                 ("invidious", "https://invidious.privacydev.net"),
                 ("piped", "https://pipedapi.kavin.rocks"),
                 ("piped", "https://pipedapi.syncpundit.io")
+            ] + instances
+        elif 'tiktok.com' in url:
+            instances = [
+                ("tikwm", "https://www.tikwm.com/api/")
             ] + instances
 
         for inst_type, api_base in instances:
@@ -227,36 +226,34 @@ def extract_video_internal():
                                 logger.info(f"Successfully extracted video via {api_base} directly")
                                 return jsonify(result)
                                 
-                elif inst_type == "cobalt":
-                    # Cobalt handles almost all social platforms
+                elif inst_type == "tikwm":
                     headers = {
-                        'Accept': 'application/json',
-                        'Content-Type': 'application/json',
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
+                        'Accept': 'application/json'
                     }
-                    payload = {'url': url}
-                    res = cffi_requests.post(api_base, json=payload, headers=headers, impersonate="chrome110", timeout=10)
+                    res = cffi_requests.post(api_base, data={'url': url}, headers=headers, impersonate="chrome110", timeout=10)
                     res.raise_for_status()
-                    cobalt_data = res.json()
+                    data = res.json()
                     
-                    video_url = cobalt_data.get('url')
-                    if video_url:
+                    if data.get('code') == 0 and 'data' in data and 'play' in data['data']:
+                        video_url = data['data']['play']
                         result = {
                             'url': video_url,
-                            'title': 'Social Video (Cobalt)',
-                            'thumbnail': '',
-                            'duration': 0,
-                            'extractor': f'Cobalt ({api_base})',
-                            'uploader': '',
+                            'title': data['data'].get('title', 'TikTok Video'),
+                            'thumbnail': data['data'].get('cover', ''),
+                            'duration': data['data'].get('duration', 0),
+                            'extractor': 'TikTok (tikwm)',
+                            'uploader': data['data'].get('author', {}).get('nickname', ''),
                             'ext': 'mp4',
                             'http_headers': {},
                             'original_url': url,
                             'requires_proxy': False
                         }
-                        logger.info(f"Successfully extracted video via Cobalt ({api_base})")
+                        logger.info("Successfully extracted TikTok via tikwm directly")
                         return jsonify(result)
                     else:
-                        logger.error(f"Cobalt {api_base} succeeded but returned no 'url'. Response: {json.dumps(cobalt_data)}")
+                        logger.error(f"Tikwm succeeded but returned error code: {json.dumps(data)}")
+
             except Exception as e:
                 # Catch both requests and cffi_requests exceptions
                 err_text = getattr(getattr(e, 'response', None), 'text', 'No response body')
@@ -265,7 +262,6 @@ def extract_video_internal():
                 print(f"FAILED {inst_type} {api_base} -> Exception: {str(e)} Status: {status_code} Body: {err_text}")
         logger.warning("All Fallbacks failed. Falling back to yt-dlp.")
 
-
     ydl_opts = {
         'noplaylist': True,
         'quiet': True,
@@ -273,7 +269,7 @@ def extract_video_internal():
         'skip_download': True,
         'no_color': True,
         'geo_bypass': True,
-        'extractor_args': {'youtube': {'player_client': ['android', 'ios']}}
+        'extractor_args': {'youtube': {'player_client': ['android', 'web']}}
     }
 
     # Use impersonation and headers for sites that need it to bypass bot detection (YouTube, TikTok, Facebook).
