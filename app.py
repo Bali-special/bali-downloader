@@ -76,6 +76,26 @@ def extract_video_internal():
             }
             response = requests.get(url, headers=headers, timeout=15)
             html_content = response.text
+            # Meta AI uses Cloudflare/Bot-protection, impersonate Chrome
+            res = cffi_requests.get(url, impersonate="chrome110", timeout=10)
+            res.raise_for_status()
+            html_content = res.text
+            
+            # The video URL is often hidden inside JSON strings in the React state.
+            # Unescape \u0026, \n, and \/ before regex matching.
+            html_unescaped = html_content.replace('\\u0026', '&').replace('\\n', '\n').replace('\\/', '/')
+            
+            # Find video URL via og:video or fallback regex
+            video_match = re.search(r'<meta\s+property=["\']og:video(?::secure_url)?["\']\s+content=["\']([^"\']+)["\']', html_unescaped)
+            if not video_match:
+                video_match = re.search(r'(https?://[^\s"\'<>]*\.mp4[^\s"\'<>]*)', html_unescaped)
+            
+            if not video_match:
+                logger.error(f"Meta AI Extraction failed. Could not find any video tag or .mp4 URL.")
+                logger.error(f"Meta AI HTML Response (First 1000 chars): {html_content[:1000]}")
+                return jsonify({'error': 'Could not find video in Meta AI page'}), 400
+            
+            v = video_match.group(1)
             
             # Find title
             title_match = re.search(r'<title>(.*?)</title>', html_content)
@@ -85,18 +105,7 @@ def extract_video_internal():
             thumb_match = re.search(r'<meta property="og:image" content="([^"]+)"', html_content)
             thumbnail = html.unescape(thumb_match.group(1)) if thumb_match else ''
             
-            # Find video URL via og:video or fallback regex
-            video_match = re.search(r'<meta\s+property=["\']og:video(?::secure_url)?["\']\s+content=["\']([^"\']+)["\']', html_content, re.IGNORECASE)
-            if not video_match:
-                video_matches = re.findall(r'(https://[^"\']+\.mp4[^"\']*)', html_content)
-                if not video_matches:
-                    logger.error(f"Meta AI Extraction failed. Could not find any video tag or .mp4 URL.")
-                    logger.error(f"Meta AI HTML Response (First 1000 chars): {html_content[:1000]}")
-                    return jsonify({'error': 'Could not find video in Meta AI page'}), 400
-                v = video_matches[0].replace('\\u0026amp;', '&').replace('\\u0026', '&')
-                v = html.unescape(v)
-            else:
-                v = html.unescape(video_match.group(1))
+            v = html.unescape(v)
             
             result = {
                 'url': v,
