@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 load_dotenv()
-API_KEY = os.getenv("API_KEY")
+API_KEY = os.getenv("API_KEY", "svd_personal_secret_key_123")
 
 app = Flask(__name__)
 # Enable CORS for all routes so our Flutter app can communicate with it
@@ -34,7 +34,7 @@ def index():
 limiter = Limiter(
     get_remote_address,
     app=app,
-    default_limits=["50 per minute"],
+    default_limits=["10 per minute"],
     storage_uri="memory://",
 )
 
@@ -460,4 +460,4 @@ def health_check():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     logger.info(f"Starting backend on port {port}...")
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=False)
