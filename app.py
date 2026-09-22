@@ -34,7 +34,7 @@ def index():
 limiter = Limiter(
     get_remote_address,
     app=app,
-    default_limits=["10 per minute"],
+    default_limits=["50 per minute"],
     storage_uri="memory://",
 )
 
