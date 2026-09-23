@@ -244,16 +244,21 @@ def extract_video_internal():
                         if thumb_url.startswith('/'):
                             thumb_url = f"https://www.tikwm.com{thumb_url}"
                             
+                        video_id = data['data'].get('id')
+                        author_data = data['data'].get('author')
+                        author_uid = author_data.get('unique_id', 'user') if isinstance(author_data, dict) else 'user'
+                        resolved_url = f"https://www.tiktok.com/@{author_uid}/video/{video_id}" if video_id else url
+                            
                         result = {
                             'url': video_url,
                             'title': data['data'].get('title', 'TikTok Video'),
                             'thumbnail': thumb_url,
                             'duration': data['data'].get('duration', 0),
                             'extractor': 'TikTok (tikwm)',
-                            'uploader': data['data'].get('author', {}).get('nickname', '') if isinstance(data['data'].get('author'), dict) else '',
+                            'uploader': author_data.get('nickname', '') if isinstance(author_data, dict) else '',
                             'ext': 'mp4',
                             'http_headers': {},
-                            'original_url': url,
+                            'original_url': resolved_url,
                             'requires_proxy': False
                         }
                         logger.info("Successfully extracted TikTok via tikwm directly")
