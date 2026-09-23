@@ -392,6 +392,7 @@ import threading
 import time
 
 @app.route('/api/proxy')
+@limiter.exempt
 def proxy_download():
     video_url = request.args.get('url')
     if not video_url:
