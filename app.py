@@ -237,10 +237,17 @@ def extract_video_internal():
                     
                     if data.get('code') == 0 and 'data' in data and 'play' in data['data']:
                         video_url = data['data']['play']
+                        if video_url.startswith('/'):
+                            video_url = f"https://www.tikwm.com{video_url}"
+                            
+                        thumb_url = data['data'].get('cover', '')
+                        if thumb_url.startswith('/'):
+                            thumb_url = f"https://www.tikwm.com{thumb_url}"
+                            
                         result = {
                             'url': video_url,
                             'title': data['data'].get('title', 'TikTok Video'),
-                            'thumbnail': data['data'].get('cover', ''),
+                            'thumbnail': thumb_url,
                             'duration': data['data'].get('duration', 0),
                             'extractor': 'TikTok (tikwm)',
                             'uploader': data['data'].get('author', {}).get('nickname', '') if isinstance(data['data'].get('author'), dict) else '',
