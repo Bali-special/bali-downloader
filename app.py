@@ -350,7 +350,7 @@ def extract_video_internal():
                 'uploader': info.get('uploader', ''),
                 'ext': info.get('ext', 'mp4') if not requires_proxy else 'mp4',
                 'http_headers': info.get('http_headers', {}),
-                'original_url': url,
+                'original_url': info.get('webpage_url', url),
                 'requires_proxy': requires_proxy
             }
             
