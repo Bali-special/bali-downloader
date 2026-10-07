@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 load_dotenv()
-API_KEY = os.getenv("API_KEY", "SuperSecret_Key_2026_Secure")
+API_KEY = os.getenv("API_KEY", "BaliSecret_Key_2026_Secure")
 
 app = Flask(__name__)
 # Enable CORS for all routes so our Flutter app can communicate with it
