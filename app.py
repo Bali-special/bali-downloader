@@ -29,7 +29,7 @@ CORS(app)
 
 @app.route('/')
 def index():
-    return jsonify({'status': 'ok', 'message': 'Super Downloader Backend is running!'})
+    return jsonify({'status': 'ok', 'message': 'Bali Downloader Backend is running!'})
 
 limiter = Limiter(
     get_remote_address,
@@ -240,7 +240,7 @@ def extract_video_internal():
                         if video_url.startswith('/'):
                             video_url = f"https://www.tikwm.com{video_url}"
                             
-                        thumb_url = data['data'].get('cover', '')
+                        thumb_url = data['data'].get('origin_cover') or data['data'].get('cover', '')
                         if thumb_url.startswith('/'):
                             thumb_url = f"https://www.tikwm.com{thumb_url}"
                             
@@ -468,9 +468,9 @@ def proxy_download():
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    return jsonify({'status': 'ok', 'message': 'Super Downloader extraction backend is running'})
+    return jsonify({'status': 'ok', 'message': 'Bali Downloader extraction backend is running'})
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
+    port = int(os.environ.get('PORT', 5001))
     logger.info(f"Starting backend on port {port}...")
     app.run(host='0.0.0.0', port=port, debug=False)

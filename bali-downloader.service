@@ -1,0 +1,15 @@
+[Unit]
+Description=Bali Downloader Backend Service
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/bali-downloader-backend
+EnvironmentFile=/home/ubuntu/bali-downloader-backend/.env
+ExecStart=/home/ubuntu/bali-downloader-backend/venv/bin/gunicorn -w 3 -b 0.0.0.0:5001 app:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
